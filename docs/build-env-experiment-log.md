@@ -30,6 +30,9 @@ across all modules; the per-module numbers are in the notes.
 | 13 | Container state read from `docker ps -a`, not `inspect` | `scripts/start-maestro-db.sh` | ready on :5432 | n/a | — |
 | 14 | Server pointed at it via the `local-db` profile | `bootRun --args='--spring.profiles.active=local-db'` | UP, Flyway migrated | n/a | ~60s to health |
 | 15 | None — server killed, DB container restarted | `GET /workflows/sample-dag-test-1/versions/latest` | HTTP 200 | n/a | — |
+| 16 | None — new turn, fresh session container | `GET /workflows/sample-dag-test-1/versions/latest` | HTTP 200 | n/a | — |
+| 17 | New workflow `persistent-db-demo` created and run | `POST /workflows`, then `actions/start` | SUCCEEDED, 4 steps | n/a | ~15s |
+| 18 | None — server killed, DB container restarted | `GET /workflows/persistent-db-demo/...` | HTTP 200 | n/a | — |
 
 ## What each run established
 
@@ -111,6 +114,20 @@ PostgreSQL 17.11. A workflow was then created (HTTP 200), started, and reached
 container restarted, the definition answered HTTP 200 and the instance was still
 `SUCCEEDED`. Run 11 and run 15 are the same request under the two
 configurations, which is what makes the pair evidence rather than assertion.
+
+**Run 16 — persistence across a session restart, not just a process restart.**
+Runs 12-15 restarted the server and the database container by hand, inside one
+session container. Run 16 is the stronger case: a new turn, with the session
+container reclaimed in between, and the workflow still answered 200. This is the
+condition under which run 11 returned 404.
+
+**Run 17 — a workflow authored against the persistent database.** `persistent-db-demo`
+fans out from `ingest` to `validate` and `enrich`, then back in to `publish`.
+Created at version 1, run to `SUCCEEDED` with all four steps, and both workflow
+ids visible in `maestro_workflow`.
+
+**Run 18 — same result for the new workflow.** Definition and instance both
+survived a server kill plus a database container restart.
 
 ## Symptom → fix
 
