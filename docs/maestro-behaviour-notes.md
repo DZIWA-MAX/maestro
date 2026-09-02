@@ -99,3 +99,34 @@ a leaf in its own right.
 `job.2` slept 10 s, 20 s and 30 s for `i` of 1, 2 and 3 (`i * 10`). The inner
 foreach of `i=3` took 10 s in total, not 15 s: its two iterations sleep `x * 5`
 for `x` of 1 and 2, and `concurrency: 3` runs them in parallel.
+
+## Step parameter merge order differs from the blog post
+
+The Maestro blog describes the step parameter merge as: default general
+parameters, then **injected** parameters, then **default typed** parameters,
+then workflow and step info, then undefined new parameters, then step definition
+parameters, then run and restart parameters.
+
+`ParamsManager.generateMergedStepParams`
+(`maestro-engine/src/main/java/com/netflix/maestro/engine/params/ParamsManager.java:141-172`)
+swaps the second and third of those:
+
+```
+1. getDefaultStepParams()                   SYSTEM_DEFAULT
+2. getDefaultParamsForType(step.getType())  SYSTEM_DEFAULT    <- typed
+3. stepRuntime.injectRuntimeParams(...)     TEMPLATE_SCHEMA   <- injected
+4. injectWorkflowAndStepInfoParams(...)     SYSTEM_INJECTED
+```
+
+This is not cosmetic. `ParamsMergeHelper.mergeParams(base, toMerge, context)`
+writes `toMerge` into `base`, so a later merge wins. In the code, parameters
+injected by the step runtime override the step type's defaults; in the order the
+blog gives, the type defaults would override the injected ones. The precedence
+of that pair is reversed.
+
+One qualification: `buildMergedParamDefinition` applies the parameter's mode, so
+a reserved or immutable parameter is not overridden regardless of merge order.
+The reversal holds for parameters whose mode permits an override.
+
+The likely explanation is that the blog post predates the current code rather
+than describing it incorrectly.
