@@ -1,0 +1,17 @@
+# Points maestro at the persistent Postgres from scripts/start-maestro-db.sh
+# instead of the throwaway Testcontainers database.
+#
+# Activate with:
+#   bash scripts/start-maestro-db.sh
+#   ./gradlew bootRun --args='--spring.profiles.active=local-db'
+#
+# Spring merges this over application.yml, so only the datasource keys are
+# repeated here -- everything else keeps the default local configuration. The
+# plain-text password is a throwaway credential for a database bound to the
+# loopback; it is not a secret and must not be reused anywhere else.
+engine:
+  configs:
+    jdbc-url: "jdbc:postgresql://127.0.0.1:5432/maestro"
+    jdbc-username: maestro
+    jdbc-password: password
+    flyway-enabled: true
