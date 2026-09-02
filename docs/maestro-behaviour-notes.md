@@ -130,3 +130,54 @@ The reversal holds for parameters whose mode permits an override.
 
 The likely explanation is that the blog post predates the current code rather
 than describing it incorrectly.
+
+## SEL is not sandboxed by the Java Security Manager
+
+The Maestro blog post says of SEL: *"It leverages the Java Security Manager to
+restrict access, ensuring a secure and controlled environment for code
+execution."*
+
+No part of this repository uses it. Searching the Java sources returns exactly
+one occurrence, and it is in a test, as a string an attacker might submit:
+
+```java
+// netflix-sel/src/test/java/com/netflix/sel/SelJailbreakTest.java:181
+"System.setSecurityManager(null);",
+```
+
+It sits in a `SYSTEM_MATH_ABUSE` array beside `System.exit(1)`,
+`System.getenv('PATH')` and `System.load('/x')` — expressions the parser is
+required to reject. There is no `SecurityManager` in any main source, no
+`.policy` file, and no `java.security.manager` setting in any Gradle, YAML or
+properties file.
+
+This matters for anyone evaluating SEL for untrusted input: the published
+guarantee is not the one the code provides. What actually contains SEL is four
+separate mechanisms.
+
+**Identifiers resolve to stand-in types, never to the JDK.** `SelTypeUtil`
+(`netflix-sel/src/main/java/com/netflix/sel/type/SelTypeUtil.java:210`) maps the
+name `System` to `SelMiscFunc.INSTANCE`, and `Math` to `SelJavaMath`. A SEL
+expression cannot reach `java.lang.System` because that name resolves to
+something else entirely. This is the primary containment: the dangerous call is
+not blocked at runtime, it is unnameable.
+
+**Evaluation runs on a dedicated thread with a restricted context classloader.**
+`SelThread.run` installs `SelClassLoader` as the context classloader
+(`netflix-sel/src/main/java/com/netflix/sel/security/SelThread.java`), and that
+loader preloads and pins a fixed set of packages — `com.netflix.sel.ast`,
+`.type`, `.visitor`, `.ext`, and `org.joda.time`.
+
+**Runtime limits bound resource use.** `SelProperties` carries `loopLimit`,
+`visitLimit` and `memoryLimit`, enforced by `MemoryCounter` and the visitors;
+`application.yml` sets them to 25001 loop iterations, a 128-deep stack, and a
+100 MB memory ceiling, among others.
+
+**`SelJailbreakTest` is the regression suite that keeps escapes failing.** It is
+the file to read first when judging how much the containment is worth, and the
+file to extend when adding a new SEL capability.
+
+The Security Manager was deprecated for removal by JEP 411 in Java 17, and this
+project targets Java 21 (`build.gradle:47`). Building the guarantee on it would
+have meant building on something already scheduled to disappear, so the code
+being ahead of the blog post is the right direction for the two to diverge in.
