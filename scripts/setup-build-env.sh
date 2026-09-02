@@ -24,3 +24,23 @@ else
   docker info >/dev/null 2>&1 || { echo "docker: daemon failed to start, see /var/log/dockerd.log" >&2; exit 1; }
   echo "docker: daemon ready"
 fi
+
+# --- Pull postgres:17 through a reachable mirror -----------------------------
+# MaestroDatabaseHelper asks for "jdbc:tc:postgresql:17:///maestro", but this
+# network policy answers 403 to CONNECT for production.cloudfront.docker.com,
+# where Docker Hub serves its blobs -- so `docker pull postgres:17` cannot
+# finish. mirror.gcr.io carries the same image and is reachable. Testcontainers
+# skips the pull when the image is already present under its canonical name,
+# so retag the mirrored copy rather than rewriting the JDBC URL.
+mirror_pull() {
+  local canonical=$1 mirrored=$2
+  if docker image inspect "$canonical" >/dev/null 2>&1; then
+    echo "image: $canonical already present"
+    return
+  fi
+  echo "image: pulling $canonical via $mirrored"
+  docker pull "$mirrored"
+  docker tag "$mirrored" "$canonical"
+}
+
+mirror_pull postgres:17 mirror.gcr.io/library/postgres:17
