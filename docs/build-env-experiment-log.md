@@ -26,6 +26,10 @@ across all modules; the per-module numbers are in the notes.
 | 9 | Wildcard entries stripped from `NO_PROXY` | `./gradlew bootRun` | UP on :8080 | n/a | ~60s to health |
 | 10 | Sourced the setup script instead of inline env | `source scripts/setup-build-env.sh && ./gradlew bootRun` | UP on :8080 | n/a | ~60s to health |
 | 11 | None — rerun after a container restart | `GET /workflows/sample-dag-test-1/versions/latest` | HTTP 404 | n/a | — |
+| 12 | Persistent Postgres container, named volume | `scripts/start-maestro-db.sh` | FAILED | n/a | — |
+| 13 | Container state read from `docker ps -a`, not `inspect` | `scripts/start-maestro-db.sh` | ready on :5432 | n/a | — |
+| 14 | Server pointed at it via the `local-db` profile | `bootRun --args='--spring.profiles.active=local-db'` | UP, Flyway migrated | n/a | ~60s to health |
+| 15 | None — server killed, DB container restarted | `GET /workflows/sample-dag-test-1/versions/latest` | HTTP 200 | n/a | — |
 
 ## What each run established
 
@@ -89,6 +93,25 @@ workflow created (HTTP 200), started (HTTP 200), instance reached `SUCCEEDED`,
 returned 404. `jdbc:tc:postgresql:17:///maestro_local` provisions a throwaway
 Postgres on every boot, so nothing created through the API outlives the process.
 
+**Run 12 — the script's own bug.** `docker inspect` on a missing container still
+writes a blank line to stdout, so `|| echo absent` produced `"\nabsent"` and the
+`case` fell through to the start branch for a container that did not exist. The
+fix reads the state from `docker ps -a --filter` and treats an empty answer as
+absent.
+
+**Run 13 — provisioned and idempotent.** Second invocation reports
+`already running` and re-runs the readiness check rather than touching the
+container.
+
+**Run 14 — Flyway against a real database.** Migrated `public` from scratch on
+PostgreSQL 17.11. A workflow was then created (HTTP 200), started, and reached
+`SUCCEEDED`, with the row visible in `maestro_workflow`.
+
+**Run 15 — the 404 is gone.** With the server killed *and* the database
+container restarted, the definition answered HTTP 200 and the instance was still
+`SUCCEEDED`. Run 11 and run 15 are the same request under the two
+configurations, which is what makes the pair evidence rather than assertion.
+
 ## Symptom → fix
 
 | Symptom | Cause | Fix |
@@ -98,13 +121,20 @@ Postgres on every boot, so nothing created through the API outlives the process.
 | `ContainerFetchException` naming `testcontainers/ryuk:<v>` | Mirrored Ryuk tag ≠ the one Testcontainers wants | Read the tag from `RyukContainer.class`; do not guess |
 | `NO_PROXY URL contains invalid entry: '*…'` | fabric8 Kubernetes client rejects wildcard entries | Strip wildcard entries; the plain suffix already covers them |
 | `UnsatisfiedDependencyException` on an unrelated bean | Real cause is at the bottom of the `Caused by` chain | Read the last `Caused by`, not the first line |
+| API returns 404 for data created earlier | Default `jdbc:tc:` database is rebuilt each boot | `scripts/start-maestro-db.sh` + `--spring.profiles.active=local-db` |
 
 ## Unresolved
 
-The script makes any given container work; it does not make a container last.
-The container is reclaimed between turns — the daemon, the server process and the
-Testcontainers Postgres all die with it, and run 11 shows the API data going with
-them. Only what is committed survives.
+The scripts make any given container work; they do not make a container last.
+The session container is reclaimed between turns and the daemon and server
+process die with it — both have to be started again every time.
+
+Application data is no longer part of that loss. Runs 12-15 moved it into a named
+Docker volume, which survives because Docker's data directory persists across
+these restarts. That is the same property the cached images rely on, and it is
+observed behaviour rather than a guarantee: if the data directory is ever wiped,
+the volume goes with it and the database starts empty again. The default
+Testcontainers path is untouched and still throws its data away by design.
 
 Two consequences worth stating plainly. Long-running work cannot be started and
 left here, because there is no long-lived machine to reattach to; session
