@@ -44,3 +44,26 @@ mirror_pull() {
 }
 
 mirror_pull postgres:17 mirror.gcr.io/library/postgres:17
+
+# Testcontainers starts its own Ryuk sidecar to reap the containers it creates,
+# and pulls that from Docker Hub too, so it needs the same treatment. The tag
+# has to match exactly, otherwise Testcontainers pulls the one it wants and
+# fails anyway -- so read it off the constant in RyukContainer.class instead of
+# guessing, and fall back to the tag current at the time of writing when the
+# dependency has not been resolved into the Gradle cache yet.
+ryuk_image() {
+  local jar found
+  jar=$(find "${GRADLE_USER_HOME:-$HOME/.gradle}/caches" -name 'testcontainers-[0-9]*.jar' 2>/dev/null | head -1)
+  if [ -n "$jar" ]; then
+    found=$(unzip -p "$jar" org/testcontainers/utility/RyukContainer.class 2>/dev/null \
+      | grep -ao 'testcontainers/ryuk:[0-9.]*' | head -1)
+    if [ -n "$found" ]; then
+      echo "$found"
+      return
+    fi
+  fi
+  echo "testcontainers/ryuk:0.12.0"
+}
+
+ryuk=$(ryuk_image)
+mirror_pull "$ryuk" "mirror.gcr.io/$ryuk"
