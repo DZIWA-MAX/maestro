@@ -67,3 +67,5 @@ ryuk_image() {
 
 ryuk=$(ryuk_image)
 mirror_pull "$ryuk" "mirror.gcr.io/$ryuk"
+
+echo "setup: ready -- './gradlew build' can now run the full suite"
