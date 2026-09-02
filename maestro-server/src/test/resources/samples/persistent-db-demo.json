@@ -1,0 +1,64 @@
+{
+  "properties": {
+    "owner": "tester",
+    "run_strategy": "sequential"
+  },
+  "workflow": {
+    "id": "persistent-db-demo",
+    "name": "Persistent database demo",
+    "description": "Fan-out/fan-in DAG used to check that workflow and instance data survives a server restart when running under the local-db profile.",
+    "params": {
+      "dataset": {
+        "value": "events",
+        "type": "STRING"
+      },
+      "run_day": {
+        "expression": "new DateTime(1569018000000).withZone(DateTimeZone.forID('UTC')).dayOfMonth().getAsText();",
+        "type": "STRING"
+      }
+    },
+    "steps": [
+      {
+        "step": {
+          "id": "ingest",
+          "type": "NoOp",
+          "transition": {
+            "successors": {
+              "validate": "true",
+              "enrich": "true"
+            }
+          }
+        }
+      },
+      {
+        "step": {
+          "id": "validate",
+          "type": "NoOp",
+          "transition": {
+            "successors": {
+              "publish": "true"
+            }
+          }
+        }
+      },
+      {
+        "step": {
+          "id": "enrich",
+          "type": "NoOp",
+          "transition": {
+            "successors": {
+              "publish": "true"
+            }
+          }
+        }
+      },
+      {
+        "step": {
+          "id": "publish",
+          "type": "NoOp",
+          "transition": {}
+        }
+      }
+    ]
+  }
+}
