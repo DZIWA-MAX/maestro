@@ -7,7 +7,11 @@
 #
 # Safe to re-run: every step is a no-op once it has been applied.
 
-set -euo pipefail
+# Only tighten the shell when run directly -- these options would leak into the
+# caller's session when the script is sourced, which bootRun needs (see below).
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  set -euo pipefail
+fi
 
 # --- Start the Docker daemon -------------------------------------------------
 # The image ships the Docker CLI but leaves the daemon down, so Testcontainers
@@ -68,4 +72,22 @@ ryuk_image() {
 ryuk=$(ryuk_image)
 mirror_pull "$ryuk" "mirror.gcr.io/$ryuk"
 
+
+# --- Drop wildcard entries from NO_PROXY -------------------------------------
+# bootRun builds a fabric8 KubernetesClient bean unconditionally, and that
+# client parses NO_PROXY strictly: the '*.svc.cluster.local' entry this sandbox
+# exports fails with "NO_PROXY URL contains invalid entry", which cascades up
+# through kubernetesRuntimeExecutor -> maestroTask -> executionContext and kills
+# the Spring context before Tomcat ever binds. The same suffix is already listed
+# in its plain '.svc.cluster.local' form, so dropping the wildcard form costs no
+# coverage.
+#
+# An exported variable only survives when this script is sourced, so a server
+# run wants:  source scripts/setup-build-env.sh && ./gradlew bootRun
+if [ -n "${NO_PROXY:-}${no_proxy:-}" ]; then
+  NO_PROXY=$(printf '%s' "${NO_PROXY:-$no_proxy}" | tr ',' '\n' | grep -v '^\*' | paste -sd, || true)
+  no_proxy=$NO_PROXY
+  export NO_PROXY no_proxy
+  echo "no_proxy: dropped wildcard entries the Kubernetes client rejects"
+fi
 echo "setup: ready -- './gradlew build' can now run the full suite"
